@@ -6,5 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-tfhe = { version = "*", features = ["boolean", "shortint", "integer", "aarch64-unix"] }
+# tfhe = { version = "*", features = ["boolean", "shortint", "integer", "aarch64-unix"] }
 chrono = "0.4"
+num-bigint = "0.4"
+miller_rabin = "1.0"
