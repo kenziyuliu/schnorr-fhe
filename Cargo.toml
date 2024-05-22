@@ -1,12 +1,17 @@
 [package]
-name = "schnorr-fhe"
+name = "schnorr_fhe"
 version = "0.1.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-# tfhe = { version = "*", features = ["boolean", "shortint", "integer", "aarch64-unix"] }
 chrono = "0.4"
-num-bigint = "0.4"
 miller_rabin = "1.0"
+ndarray = "0.15.4"
+num = "0.4"
+num-bigint = "0.4"
+num-traits = "0.2"
+phf = { version = "0.10", features = ["macros"] }
+rand = "0.8"
+tfhe = { version = "*", features = ["boolean", "shortint", "integer", "aarch64-unix"] }
