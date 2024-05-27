@@ -13,18 +13,7 @@ use tfhe::{
 use crate::constants;
 use crate::utils;
 
-// An instance of Poseidon following Neptune/File except the prime size is different
-
-fn pick_round_constants_p32(r_full: usize, r_partial: usize) -> Vec<u64> {
-    // Pick the round constants based on the number of full and partial rounds
-    if r_full == 2 && r_partial == 1 {
-        T4_P32_RC_R1_TEST.to_vec()
-    } else {
-        T4_P32_RC.to_vec()
-    }
-}
-
-fn apply_mds_matrix(
+fn apply_mds_matrix_u64(
     inputs: Vec<FheUint64>,
     mds_matrix: &[[u64; constants::POSEIDON_T]; constants::POSEIDON_T],
     prime: u64,
@@ -49,19 +38,44 @@ fn apply_mds_matrix(
     outputs
 }
 
-pub fn poseidon_p32(inputs: Vec<&FheUint32>, r_full: usize, r_partial: usize) -> FheUint32 {
+fn pick_round_constants_p32(r_full: usize, r_partial: usize) -> Vec<u64> {
+    // Pick the round constants based on the number of full and partial rounds
+    if r_full == 2 && r_partial == 1 {
+        T4_P32_RC_R1_TEST.to_vec()
+    } else {
+        T4_P32_RC.to_vec()
+    }
+}
+
+pub fn poseidon_p32_rf2_rp1(inputs: [&FheUint32; constants::POSEIDON_T]) -> FheUint32 {
+    poseidon_p32_impl(inputs, 2, 1)
+}
+
+pub fn poseidon_p32(inputs: [&FheUint32; constants::POSEIDON_T]) -> FheUint32 {
+    poseidon_p32_impl(
+        inputs,
+        constants::POSEIDON_R_FULL,
+        constants::POSEIDON_R_PARTIAL,
+    )
+}
+
+pub fn poseidon_p32_impl(
+    inputs: [&FheUint32; constants::POSEIDON_T],
+    r_full: usize,
+    r_partial: usize,
+) -> FheUint32 {
     // TODO: depending on the r_full and r_partial, pick the round constants
     let round_consts = pick_round_constants_p32(r_full, r_partial);
     assert_eq!(
         round_consts.len(),
         (r_full + r_partial) * constants::POSEIDON_T
     );
-    // Check input length
-    assert_eq!(inputs.len(), constants::POSEIDON_T);
     // Check r_full is even
     assert_eq!(r_full % 2, 0);
 
     // Apply mod prime to all inputs (refs in, values out)
+    // Note that we dont yet need to move up bit-width since inputs must fit in
+    // 32-bit uints and the prime is 32-bit; i.e., no overflow just to do mod.
     let inputs: Vec<FheUint32> = inputs
         .iter()
         .map(|x| (*x) % constants::POSEIDON_P_32)
@@ -89,11 +103,11 @@ pub fn poseidon_p32(inputs: Vec<&FheUint32>, r_full: usize, r_partial: usize) ->
             rc_counter += 1;
 
             // 2. Apply S-Box
-            let new_val = utils::fhe_exp_64_mod(&new_val, constants::POSEIDON_ALPHA as u64, p32_64);
+            let new_val = utils::fhe_modexp_64(&new_val, constants::POSEIDON_ALPHA as u64, p32_64);
             inputs_64[j] = new_val;
         }
         // 3. Apply MDS matrix
-        inputs_64 = apply_mds_matrix(inputs_64, &T4_P32_MDS_MATRIX, p32_64);
+        inputs_64 = apply_mds_matrix_u64(inputs_64, &T4_P32_MDS_MATRIX, p32_64);
     }
 
     // Partial rounds
@@ -106,9 +120,9 @@ pub fn poseidon_p32(inputs: Vec<&FheUint32>, r_full: usize, r_partial: usize) ->
         }
         // 2. Apply S-Box
         inputs_64[0] =
-            utils::fhe_exp_64_mod(&inputs_64[0], constants::POSEIDON_ALPHA as u64, p32_64);
+            utils::fhe_modexp_64(&inputs_64[0], constants::POSEIDON_ALPHA as u64, p32_64);
         // 3. Apply MDS matrix
-        inputs_64 = apply_mds_matrix(inputs_64, &T4_P32_MDS_MATRIX, p32_64);
+        inputs_64 = apply_mds_matrix_u64(inputs_64, &T4_P32_MDS_MATRIX, p32_64);
     }
 
     // Full rounds: second half
@@ -120,11 +134,11 @@ pub fn poseidon_p32(inputs: Vec<&FheUint32>, r_full: usize, r_partial: usize) ->
             rc_counter += 1;
 
             // 2. Apply S-Box
-            let new_val = utils::fhe_exp_64_mod(&new_val, constants::POSEIDON_ALPHA as u64, p32_64);
+            let new_val = utils::fhe_modexp_64(&new_val, constants::POSEIDON_ALPHA as u64, p32_64);
             inputs_64[j] = new_val;
         }
         // 3. Apply MDS matrix
-        inputs_64 = apply_mds_matrix(inputs_64, &T4_P32_MDS_MATRIX, p32_64);
+        inputs_64 = apply_mds_matrix_u64(inputs_64, &T4_P32_MDS_MATRIX, p32_64);
     }
 
     // Return the first element
@@ -215,7 +229,7 @@ mod tests {
 
     // Test FHE matrix multiplication
     #[test]
-    fn test_apply_mds_matrix() {
+    fn test_apply_mds_matrix_u64() {
         let (client_key, server_key, _public_key) = utils::init_keys();
         set_server_key(server_key);
 
@@ -226,7 +240,8 @@ mod tests {
             FheUint64::encrypt(2u64, &client_key),
             FheUint64::encrypt(8u64, &client_key),
         ];
-        let output = apply_mds_matrix(inputs, &T4_P32_MDS_MATRIX, constants::POSEIDON_P_32 as u64);
+        let output =
+            apply_mds_matrix_u64(inputs, &T4_P32_MDS_MATRIX, constants::POSEIDON_P_32 as u64);
         let output: Vec<u64> = output.iter().map(|x| x.decrypt(&client_key)).collect();
 
         // Print output
@@ -247,20 +262,21 @@ mod tests {
         assert_eq!(output, expected);
     }
 
-    // Test Poseidon end-to-end but with r_full = 2, r_partial = 1
+    // Test Poseidon end-to-end but with r_full = 2, r_partial = 1 for fast testing
     #[test]
-    fn test_poseidon_p32_r1() {
+    fn test_poseidon_p32_rf2_rp1() {
         let (client_key, server_key, _public_key) = utils::init_keys();
         set_server_key(server_key);
 
         // Inputs
-        let inputs: Vec<FheUint32> = vec![
-            FheUint32::encrypt(1u32, &client_key),
-            FheUint32::encrypt(0u32, &client_key),
-            FheUint32::encrypt(2u32, &client_key),
-            FheUint32::encrypt(8u32, &client_key),
+        let inputs: [&FheUint32; constants::POSEIDON_T] = [
+            &FheUint32::encrypt(1u32, &client_key),
+            &FheUint32::encrypt(0u32, &client_key),
+            &FheUint32::encrypt(2u32, &client_key),
+            &FheUint32::encrypt(8u32, &client_key),
         ];
-        let output = poseidon_p32(inputs.iter().collect(), 2, 1);
+        // let output = poseidon_p32(inputs.iter().collect(), 2, 1);
+        let output = poseidon_p32_rf2_rp1(inputs);
         let output: u32 = output.decrypt(&client_key);
 
         // Expected output based on T4_P32_MDS_MATRIX @ [1, 0, 2, 8]
@@ -273,28 +289,24 @@ mod tests {
         // H32_r1.run_hash([1,0,2,8])
         // ```
         let expected: u32 = 1725970220;
-        // Check
         assert_eq!(output, expected);
     }
 
     // Test Poseidon end-to-end
+    // NOTE: this hash run takes ~13284.12s on M2 Max.
     #[test]
     fn test_poseidon_p32_full() {
         let (client_key, server_key, _public_key) = utils::init_keys();
         set_server_key(server_key);
 
         // Inputs
-        let inputs: Vec<FheUint32> = vec![
-            FheUint32::encrypt(1u32, &client_key),
-            FheUint32::encrypt(0u32, &client_key),
-            FheUint32::encrypt(2u32, &client_key),
-            FheUint32::encrypt(8u32, &client_key),
+        let inputs: [&FheUint32; constants::POSEIDON_T] = [
+            &FheUint32::encrypt(1u32, &client_key),
+            &FheUint32::encrypt(0u32, &client_key),
+            &FheUint32::encrypt(2u32, &client_key),
+            &FheUint32::encrypt(8u32, &client_key),
         ];
-        let output = poseidon_p32(
-            inputs.iter().collect(),
-            constants::POSEIDON_R_FULL,
-            constants::POSEIDON_R_PARTIAL,
-        );
+        let output = poseidon_p32(inputs);
         let output: u32 = output.decrypt(&client_key);
 
         // Expected output based on T4_P32_MDS_MATRIX @ [1, 0, 2, 8]
@@ -307,7 +319,38 @@ mod tests {
         // H32.run_hash([1,0,2,8])
         // ```
         let expected: u32 = 1502657535;
-        // Check
         assert_eq!(output, expected);
     }
+
+    /*
+    // NOTE: `Rem '%' with clear value is not yet supported by Cuda devices`
+    // So we'll need to encrypt the clear values separately!
+    #[test]
+    fn test_poseidon_p32_full_gpu() {
+        let (client_key, server_key, _public_key) = utils::init_keys_gpu();
+        set_server_key(server_key);
+
+        // Inputs
+        let inputs: [&FheUint32; constants::POSEIDON_T] = [
+            &FheUint32::encrypt(1u32, &client_key),
+            &FheUint32::encrypt(0u32, &client_key),
+            &FheUint32::encrypt(2u32, &client_key),
+            &FheUint32::encrypt(8u32, &client_key),
+        ];
+        let output = poseidon_p32(inputs);
+        let output: u32 = output.decrypt(&client_key);
+
+        // Expected output based on T4_P32_MDS_MATRIX @ [1, 0, 2, 8]
+        // To reproduce:
+        // ```
+        // from poseidon import Poseidon
+        // p32 = 3552575077
+        // H32 = Poseidon(p=p32, security_level=32, alpha=5, input_rate=None,
+        //                t=4, full_round=8, partial_round=56)
+        // H32.run_hash([1,0,2,8])
+        // ```
+        let expected: u32 = 1502657535;
+        assert_eq!(output, expected);
+    }
+    */
 }
