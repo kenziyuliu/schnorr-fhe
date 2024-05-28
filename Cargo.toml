@@ -15,3 +15,6 @@ num-traits = "0.2"
 phf = { version = "0.10", features = ["macros"] }
 rand = "0.8"
 tfhe = { version = "*", features = ["boolean", "shortint", "integer", "aarch64-unix"] }
+
+# GPU backend not supported on mac
+# tfhe = { version = "0.6.1", features = [ "boolean", "shortint", "integer", "aarch64-unix", "gpu" ] }

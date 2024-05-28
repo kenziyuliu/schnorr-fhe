@@ -1,99 +1,104 @@
 extern crate chrono;
 use chrono::Local;
-use rand::Rng;
-use rand::rngs::OsRng;
 use num_bigint::BigUint;
 use num_traits::ToPrimitive;
+use rand::rngs::OsRng;
+use rand::Rng;
 
-use tfhe::{set_server_key, FheUint128, ClientKey, ServerKey, CompressedServerKey, PublicKey, CompactPublicKey}; // 128-bit
-use tfhe::{FheUint32, FheUint8};
 use tfhe::prelude::*;
+use tfhe::set_server_key;
+use tfhe::{FheUint128, FheUint16, FheUint32, FheUint64, FheUint8};
 
-mod utils;
 mod constants;
 mod poseidon;
+mod utils;
 
 /*
  * Implementation choices:
- * - We use 128-bit integers for the homomorphic encryption. This implies
- *   - We will use up to a 128-bit prime for Poseidon prime field (p < 2^128)
- *   - The message will be 64-bit (m < 2^64)
- *   - The randomness (r) will be 64-bit (r < 2^64)
- *   - Small 64-bit numbers so that whatever prime we choose, we can always
- *     operate the numbers with FheUint64 without overflow
- * - Later, we can double the bitwidth for all integers involved
- * - Schnorr
- *   - Schnorr involves picking
+ * - We will start with
+ *   - 32-bit primes, keys, randomness, and messages (16-bit q for schnorr)
+ *   - 64-bit FheUint to handle modulo adds/mults without overflowing
+ * - This implies
+ *   - We will need to cast between FheUint types
+ *   - we will have << 32-bit values in the FheUint64 container
+ * - Genreally, for a given bit-width n, we will need 2n-bit FheUint containers
  */
-
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (client_key, server_keys, public_key) = utils::init_keys();
-
-
-    ////// Initialization: Schnorr params, keys, and encryption //////
-    utils::log("Generating plaintext Schnorr keys...");
-    let mut rng = OsRng;
-    let x_sch = BigUint::from(rng.gen_range(1..constants::SCH_Q_64));
-    let g_sch = BigUint::from(constants::SCH_G_128);
-    let p_sch = BigUint::from(constants::SCH_P_128);
-    let q_sch = BigUint::from(constants::SCH_Q_64);
-    let y_sch = g_sch.modpow(&x_sch, &p_sch);
-    // Convert back to plain integers
-    let x_sch = x_sch.to_u128().expect("x_sch is too large");
-    let y_sch = y_sch.to_u128().expect("y_sch is too large");
-    // Encrypt the signing key
-    utils::log("Encrypting signing Schnorr key...");
-    let x_sch_enc = FheUint128::try_encrypt(x_sch, &client_key)?;
-
-
-    ////// Signing //////
-
-    // TODO: for now, we will use hardcoded numbers as the "randomness"
-    // for the signature. In principle, this can be the
-
-
-
-    utils::log("Encrypting data...");
-    let clear_a = 1344u32;
-    let clear_b = 5u32;
-    let clear_c = 7u8;
-
-    // Encrypting the input data using the (private) client_key
-    // FheUint32: Encrypted equivalent to u32
-    let mut encrypted_a = FheUint32::try_encrypt(clear_a, &client_key)?;
-    let encrypted_b = FheUint32::try_encrypt(clear_b, &client_key)?;
-
-    // FheUint8: Encrypted equivalent to u8
-    let encrypted_c = FheUint8::try_encrypt(clear_c, &client_key)?;
-
-    // On the server side:
     set_server_key(server_keys);
 
-    // Clear equivalent computations: 1344 * 5 = 6720
-    utils::log("Server performing multiplication...");
-    let encrypted_res_mul = &encrypted_a * &encrypted_b;
+    ////////////////////////////////////////////////////////////////////////////
+    /////////// Initialization: Schnorr params, keys, and encryption ///////////
+    // TODO: for now, we focus on 32-bit p, keys, and message, and 16-bit q
+    ////////////////////////////////////////////////////////////////////////////
+    utils::log("Generating plaintext Schnorr keys...");
+    let mut rng = OsRng;
+    let x_sch = rng.gen_range(1..constants::SCH_Q_16);
+    let g_sch = BigUint::from(constants::SCH_G_32);
+    let p_sch = BigUint::from(constants::SCH_P_32);
+    let q_sch = constants::SCH_Q_16;
+    let y_sch = g_sch.modpow(&BigUint::from(x_sch), &p_sch);
+    // Encrypt the signing key
+    utils::log("Encrypting signing Schnorr key...");
+    let x_sch_enc = FheUint32::encrypt(x_sch, &client_key);
 
-    // Clear equivalent computations: 6720 >> 5 = 210
-    utils::log("Server performing right shift...");
-    encrypted_a = &encrypted_res_mul >> &encrypted_b;
+    ////////////////////////////////////////////////////////////////////////////
+    ///////////////////////////////// Signing //////////////////////////////////
+    ////////////////////////////////////////////////////////////////////////////
+    utils::log("FHE signing @ server ...");
+    let msg: u32 = 0xAAAAAAAA; // NOTE: this is some random 32-bit message to sign
+    let msg_enc: FheUint32 = FheUint32::encrypt(msg, &public_key);
+    let zero_enc: FheUint32 = FheUint32::encrypt(0u32, &public_key);
 
-    // Clear equivalent computations: let casted_a = a as u8;
-    let casted_a: FheUint8 = encrypted_a.cast_into();
+    // Generate pseudo-random nonce, as FHE(k) = H(FHE(m), FHE(x_sch)) (mod q)
+    utils::log("\t Pseudorandomness as FHE(k) = H(FHE(m), FHE(x_sch)) (mod q) ...");
+    let k_enc: FheUint32 =
+        poseidon::poseidon_p32([&msg_enc, &x_sch_enc, &zero_enc, &(zero_enc.clone())]);
+    let k_enc: FheUint32 = &k_enc % ((q_sch - 1) as u32) + 1; // ensures k in [1, q-1]
+    let k_enc_up: FheUint64 = k_enc.cast_into();
 
-    // Clear equivalent computations: min(210, 7) = 7
-    utils::log("Server performing min...");
-    let encrypted_res_min = &casted_a.min(&encrypted_c);
+    // Compute exponentiation: FHE(r) = FHE(g)^FHE(k) (mod p).
+    // NOTE: need to move up to 64-bit FheUint to handle this operation
+    utils::log("\t Exponentiating: FHE(k) = FHE(r) = FHE(g)^FHE(k) (mod p) ...");
+    let g_enc_up: FheUint64 = FheUint32::encrypt(constants::SCH_G_32, &public_key).cast_into();
+    let p_sch_up: u64 = p_sch.to_u64().expect("p_sch is too large");
+    let r_enc_up: FheUint64 = utils::fhe2_modexp_64(&g_enc_up, &k_enc_up, p_sch_up);
+    let r_enc: FheUint32 = r_enc_up.cast_into(); // already (mod p)
 
-    // Operation between clear and encrypted data:
-    // Clear equivalent computations: 7 & 1 = 1
-    utils::log("Server performing bitwise AND...");
-    let encrypted_res = encrypted_res_min & 1_u8;
+    // Compute hash of the message: FHE(h) = H(FHE(m), FHE(r)) (mod q)
+    utils::log("\t Hashing: FHE(h) = H(FHE(m), FHE(r)) (mod q) ...");
+    let h_enc: FheUint32 =
+        poseidon::poseidon_p32([&msg_enc, &r_enc, &zero_enc, &(zero_enc.clone())]);
+    let h_enc: FheUint32 = &h_enc % (q_sch as u32); // NOTE: ensures h in [0, q-1]
 
-    // Decrypting on the client side:
-    utils::log("Client decrypting result...");
-    let clear_res: u8 = encrypted_res.decrypt(&client_key);
-    assert_eq!(clear_res, 1_u8);
+    // Compute signature: FHE(s) = (FHE(k) - FHE(x_sch) * FHE(h)) (mod q)
+    utils::log("\t Signing: FHE(s) = (FHE(k) - FHE(x_sch) * FHE(h)) (mod q) ...");
+    let x_sch_enc_up: FheUint64 = x_sch_enc.cast_into();
+    let h_enc_up: FheUint64 = h_enc.clone().cast_into();
+    let hx_enc_up: FheUint64 = (&x_sch_enc_up * &h_enc_up) % (q_sch as u64);
+    let s_enc_up: FheUint64 = (k_enc_up - hx_enc_up) % (q_sch as u64);
+    let s_enc: FheUint32 = s_enc_up.cast_into();
+
+    utils::log("FHE decryption of FHE(s), FHE(h) @ client ...");
+    let s_dec: u32 = s_enc.decrypt(&client_key);
+    let h_dec: u32 = h_enc.decrypt(&client_key);
+
+    ////////////////////////////////////////////////////////////////////////////
+    ///////////////////////////////// Verification /////////////////////////////
+    ////////////////////////////////////////////////////////////////////////////
+    utils::log("FHE signature verification @ server ...");
+    // Compute r_v = g^s * y^h (mod p); here, g and y are public and s and h are decrypted
+    let r_v_left = g_sch.modpow(&BigUint::from(s_dec), &p_sch);
+    let r_v_right = y_sch.modpow(&BigUint::from(h_dec), &p_sch);
+    let r_v = (r_v_left * r_v_right) % &p_sch;
+    let r_v = r_v.to_u32().expect("r_v is too large");
+    // Compute clear hash of the message: h_v = H(m, r_v) (mod q)
+    let h_v = poseidon::poseidon_p32_clear([msg, r_v, 0u32, 0u32]);
+    let h_v = h_v % (q_sch as u32);
+    // Verify if h_v == h_dec
+    let is_verified = h_v == h_dec;
+    utils::log(&format!("Signature verification: {}", is_verified));
 
     Ok(())
 }

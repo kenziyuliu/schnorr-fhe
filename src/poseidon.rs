@@ -1,14 +1,7 @@
-// use ndarray::Array1;
-// use ndarray::Array2;
-// use phf::phf_map;
-
-// use tfhe::integer::bigint::{u256, u512};
+use num::BigUint;
+use num_traits::ToPrimitive;
 use tfhe::prelude::*;
-use tfhe::{generate_keys, FheUint32, FheUint64, FheUint8};
-use tfhe::{
-    set_server_key, ClientKey, CompactPublicKey, CompressedServerKey, ConfigBuilder, FheUint128,
-    PublicKey, ServerKey,
-}; // 128-bit
+use tfhe::{FheUint32, FheUint64};
 
 use crate::constants;
 use crate::utils;
@@ -31,6 +24,23 @@ fn apply_mds_matrix_u64(
         let mut output: FheUint64 = &(&inputs[0] * mds_matrix[i][0]) % prime;
         for j in 1..inputs.len() {
             let mult = &(&inputs[j] * mds_matrix[i][j]) % prime;
+            output = &(&output + &mult) % prime;
+        }
+        outputs.push(output);
+    }
+    outputs
+}
+
+fn apply_mds_matrix_biguint(
+    inputs: Vec<BigUint>,
+    mds_matrix: &Vec<Vec<BigUint>>,
+    prime: &BigUint,
+) -> Vec<BigUint> {
+    let mut outputs: Vec<BigUint> = Vec::new();
+    for i in 0..inputs.len() {
+        let mut output: BigUint = BigUint::from(0u32);
+        for j in 0..inputs.len() {
+            let mult = &(&inputs[j] * &mds_matrix[i][j]) % prime;
             output = &(&output + &mult) % prime;
         }
         outputs.push(output);
@@ -64,12 +74,8 @@ pub fn poseidon_p32_impl(
     r_full: usize,
     r_partial: usize,
 ) -> FheUint32 {
-    // TODO: depending on the r_full and r_partial, pick the round constants
-    let round_consts = pick_round_constants_p32(r_full, r_partial);
-    assert_eq!(
-        round_consts.len(),
-        (r_full + r_partial) * constants::POSEIDON_T
-    );
+    let rc_list = pick_round_constants_p32(r_full, r_partial);
+    assert_eq!(rc_list.len(), (r_full + r_partial) * constants::POSEIDON_T);
     // Check r_full is even
     assert_eq!(r_full % 2, 0);
 
@@ -99,7 +105,7 @@ pub fn poseidon_p32_impl(
         for j in 0..inputs.len() {
             // 1. Add round constants
             // inner &: addition of FheUint64 and u64; outer &: mod p32_64
-            let new_val = &(&inputs_64[j] + round_consts[rc_counter]) % p32_64;
+            let new_val = &(&inputs_64[j] + rc_list[rc_counter]) % p32_64;
             rc_counter += 1;
 
             // 2. Apply S-Box
@@ -114,7 +120,7 @@ pub fn poseidon_p32_impl(
     for _i in 0..r_partial {
         for j in 0..inputs.len() {
             // 1. Add round constants
-            let new_val = &(&inputs_64[j] + round_consts[rc_counter]) % p32_64;
+            let new_val = &(&inputs_64[j] + rc_list[rc_counter]) % p32_64;
             inputs_64[j] = new_val;
             rc_counter += 1;
         }
@@ -130,7 +136,7 @@ pub fn poseidon_p32_impl(
         for j in 0..inputs.len() {
             // 1. Add round constants
             // inner &: addition of FheUint64 and u64; outer &: mod p32_64
-            let new_val = &(&inputs_64[j] + round_consts[rc_counter]) % p32_64;
+            let new_val = &(&inputs_64[j] + rc_list[rc_counter]) % p32_64;
             rc_counter += 1;
 
             // 2. Apply S-Box
@@ -143,6 +149,108 @@ pub fn poseidon_p32_impl(
 
     // Return the first element
     let hash: FheUint32 = inputs_64[1].clone().cast_into();
+    hash
+}
+
+/*
+ * Same as `poseidon_p32_impl` but operates in the clear. Make use of
+ * linear algebra optimizations for the MDS matrix multiplication.
+ *
+ * Note that while the logic applies to any unsigned integer type (due to the
+ * use of BigUint), the make use of the MDS matrix / round constants that
+ * are specific to 32-bit.
+ *
+ * TODO: In future refactoring, we can implement a generic version that
+ * can handle any bit-width.
+ */
+
+pub fn poseidon_p32_clear_rf2_rp1(inputs: [u32; constants::POSEIDON_T]) -> u32 {
+    poseidon_p32_clear_impl(inputs, 2, 1)
+}
+
+pub fn poseidon_p32_clear(inputs: [u32; constants::POSEIDON_T]) -> u32 {
+    poseidon_p32_clear_impl(
+        inputs,
+        constants::POSEIDON_R_FULL,
+        constants::POSEIDON_R_PARTIAL,
+    )
+}
+
+pub fn poseidon_p32_clear_impl(
+    inputs: [u32; constants::POSEIDON_T],
+    r_full: usize,
+    r_partial: usize,
+) -> u32 {
+    let rc_list = pick_round_constants_p32(r_full, r_partial);
+    assert_eq!(rc_list.len(), (r_full + r_partial) * constants::POSEIDON_T);
+    assert_eq!(r_full % 2, 0);
+
+    // Apply mod prime to all inputs (refs in, values out)
+    // Note that we dont yet need to move up bit-width since inputs must fit in
+    // 32-bit uints and the prime is 32-bit; i.e., no overflow just to do mod.
+    let inputs: Vec<u32> = inputs
+        .iter()
+        .map(|x| x % constants::POSEIDON_P_32)
+        .collect();
+
+    // NOTE: Handling modular addition and multiplication overflow.
+    // To handle overflow, we will use a larger type for the intermediate operations
+    // and then cast down the results before returning.
+    // Now convert the inputs to FheUint64.
+    let p_big = BigUint::from(constants::POSEIDON_P_32);
+    let alpha = BigUint::from(constants::POSEIDON_ALPHA);
+    let mut inputs: Vec<BigUint> = inputs.iter().map(|x| BigUint::from(*x)).collect();
+    let mut rc_counter: usize = 0;
+    let mds_matrix = T4_P32_MDS_MATRIX
+        .iter()
+        .map(|x| x.iter().map(|y| BigUint::from(*y)).collect())
+        .collect::<Vec<Vec<BigUint>>>();
+
+    // Full rounds: first half
+    for _i in 0..r_full / 2 {
+        for j in 0..inputs.len() {
+            // 1. Add round constants
+            // inner &: addition of FheUint64 and u64; outer &: mod p_big
+            let new_val = &(&inputs[j] + rc_list[rc_counter]) % &p_big;
+            rc_counter += 1;
+            // 2. Apply S-Box
+            inputs[j] = new_val.modpow(&alpha, &p_big);
+        }
+        // 3. Apply MDS matrix
+        // NOTE: since matrix is small, we can do the multiplication directly
+        inputs = apply_mds_matrix_biguint(inputs, &mds_matrix, &p_big);
+    }
+
+    // Partial rounds
+    for _i in 0..r_partial {
+        for j in 0..inputs.len() {
+            // 1. Add round constants
+            inputs[j] = &(&inputs[j] + rc_list[rc_counter]) % &p_big;
+            rc_counter += 1;
+        }
+        // 2. Apply S-Box
+        inputs[0] = inputs[0].modpow(&alpha, &p_big);
+        // 3. Apply MDS matrix
+        inputs = apply_mds_matrix_biguint(inputs, &mds_matrix, &p_big);
+    }
+
+    // Full rounds: second half
+    for _i in 0..r_full / 2 {
+        for j in 0..inputs.len() {
+            // 1. Add round constants
+            // inner &: addition of FheUint64 and u64; outer &: mod p_big
+            let new_val = &(&inputs[j] + rc_list[rc_counter]) % &p_big;
+            rc_counter += 1;
+            // 2. Apply S-Box
+            inputs[j] = new_val.modpow(&alpha, &p_big);
+        }
+        // 3. Apply MDS matrix
+        // NOTE: since matrix is small, we can do the multiplication directly
+        inputs = apply_mds_matrix_biguint(inputs, &mds_matrix, &p_big);
+    }
+
+    // Return the first element
+    let hash: u32 = inputs[1].to_u32().expect("Failed to convert to u32");
     hash
 }
 
@@ -319,6 +427,27 @@ mod tests {
         // H32.run_hash([1,0,2,8])
         // ```
         let expected: u32 = 1502657535;
+        assert_eq!(output, expected);
+    }
+
+    // Test Poseidon end-to-end, in the clear
+    #[test]
+    fn test_poseidon_p32_clear_full() {
+        // Inputs
+        let inputs: [u32; constants::POSEIDON_T] = [1u32, 0u32, 2u32, 8u32];
+        let output = poseidon_p32_clear(inputs);
+        // see `test_poseidon_p32_full` above for expected result
+        let expected: u32 = 1502657535;
+        assert_eq!(output, expected);
+    }
+
+    #[test]
+    fn test_poseidon_p32_clear_rf2_rp1() {
+        // Inputs
+        let inputs: [u32; constants::POSEIDON_T] = [1u32, 0u32, 2u32, 8u32];
+        let output = poseidon_p32_clear_rf2_rp1(inputs);
+        // see `test_poseidon_p32_rf2_rp1` above for expected result
+        let expected: u32 = 1725970220;
         assert_eq!(output, expected);
     }
 
