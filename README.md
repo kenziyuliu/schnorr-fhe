@@ -1,5 +1,24 @@
 # Schnorr-FHE
 
+(**Work in progress**)
+
+This is a Rust implementation of the Schnorr signature scheme under fully homomorphic encryption (FHE) for the signing process. The intuition is that the signing process can be done entirely in the FHE space by a public entity (say a coordinator / server) to produce an *encrypted* signature; only the true signer (who holds the FHE decryption key) can decrypt the signature to obtain the actual signature to be verified. The motivation is that we can reduce the number of communication round trips between the coordinator and the signer(s) for a threshold signature to one. See https://eprint.iacr.org/2017/956.pdf for more details.
+
+This "Schnorr-FHE" signature scheme works roughly as follows:
+
+1. The signer releases encrypted secret signing key `E(x_sch)`
+2. The coordinator receives the message `m` to be signed
+3. The coordinator signs the message `m` entirely in the FHE space
+4. The coordinator sends the encypted signature `E(s), E(h)` to the signer for decryption
+5. The signer decrypts the signature to obtain the actual signature `(s, h)` to be verified by the coordinator.
+
+Threshold signatures are not yet implemented.
+
+The FHE scheme used is TFHE, a ring-LWE-based FHE scheme. We use the Rust implementation [`TFHE-rs`](https://github.com/zama-ai/tfhe-rs).
+
+The hash function used is [Poseidon](https://eprint.iacr.org/2019/458.pdf), with references to the [Python implementation](https://github.com/ingonyama-zk/poseidon-hash/).
+
+
 ## Implementation TODOs
 
 * Schnorr-FHE Setup
@@ -40,6 +59,10 @@
 
 * Scaling behavior: implementation/refactoring to support different number of bits
     - (r) Plain Rust doesn't have u256 so we'll use `tfhe::integer::bigint::u256::U256`
+
+* Refactoring
+    - Drastically improve code sharing
+    - Implement abstraction over different bit sizes
 
 * Behavioral tests
     - (d) adding/multiplying plaintexts to FheUints

@@ -34,10 +34,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     ////////////////////////////////////////////////////////////////////////////
     utils::log("Generating plaintext Schnorr keys...");
     let mut rng = OsRng;
-    let x_sch = rng.gen_range(1..constants::SCH_Q_16);
-    let g_sch = BigUint::from(constants::SCH_G_32);
-    let p_sch = BigUint::from(constants::SCH_P_32);
-    let q_sch = constants::SCH_Q_16;
+    let x_sch = rng.gen_range(1..constants::SCH_Q);
+    let g_sch = BigUint::from(constants::SCH_G);
+    let p_sch = BigUint::from(constants::SCH_P);
+    let q_sch = constants::SCH_Q;
     let y_sch = g_sch.modpow(&BigUint::from(x_sch), &p_sch);
     // Encrypt the signing key
     utils::log("Encrypting signing Schnorr key...");
@@ -61,7 +61,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Compute exponentiation: FHE(r) = FHE(g)^FHE(k) (mod p).
     // NOTE: need to move up to 64-bit FheUint to handle this operation
     utils::log("\t Exponentiating: FHE(k) = FHE(r) = FHE(g)^FHE(k) (mod p) ...");
-    let g_enc_up: FheUint64 = FheUint32::encrypt(constants::SCH_G_32, &public_key).cast_into();
+    let g_enc_up: FheUint64 = FheUint32::encrypt(constants::SCH_G, &public_key).cast_into();
     let p_sch_up: u64 = p_sch.to_u64().expect("p_sch is too large");
     let r_enc_up: FheUint64 = utils::fhe2_modexp_64(&g_enc_up, &k_enc_up, p_sch_up);
     let r_enc: FheUint32 = r_enc_up.cast_into(); // already (mod p)
