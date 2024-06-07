@@ -18,16 +18,19 @@ pub const SCH_Q_4: u8 = 11;
 
 pub const POSEIDON_P_128: u128 = SCH_P_128;    // NOTE: use the same prime
 pub const POSEIDON_P_32: u32 = SCH_P_32;       // NOTE: use the same prime
+pub const POSEIDON_P_8: u8 = SCH_P_8;       // NOTE: use the same prime
 pub const POSEIDON_ALPHA: u8 = 5;              // Alpha constant
 pub const POSEIDON_T: usize = 4;               // Number of state elements
 pub const POSEIDON_R_FULL: usize = 8;          // Number of full rounds
 pub const POSEIDON_R_PARTIAL: usize = 56;      // Number of partial rounds
 
-// Final consts to determine testing bitwidth
-pub const P_BITWIDTH: usize = 32;
-pub const SCH_P: u32 = SCH_P_32;
-pub const SCH_G: u32 = SCH_G_32;
-pub const SCH_Q: u32 = SCH_Q_16;
+////////////////////////
+//// Final consts to determine testing bitwidth
+pub const P_BITWIDTH: usize = 8;
+pub const SCH_P: u8 = SCH_P_8;
+pub const SCH_G: u8 = SCH_G_8;
+pub const SCH_Q: u8 = SCH_Q_4;
+pub const POSEIDON_P: u8 = SCH_P;
 
 
 /////////////// Tests below ///////////////

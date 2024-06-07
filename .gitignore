@@ -1,2 +1,5 @@
 /target
 /stash
+**/*.pyc
+**/__pycache__
+

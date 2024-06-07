@@ -268,7 +268,7 @@ pub fn poseidon_p32_clear_impl(
  *                 input_rate=None, t=4, full_round=8, partial_round=56)
  *  ```
  *  3. For round constants: read `list(map(int, H32.rc_field))`
- *  4. For MDS matrix: read `list(map(int, H32.mds_matrix))`
+ *  4. For MDS matrix: read `H32.mds_matrix`
  */
 
 // number of round constants
@@ -327,7 +327,9 @@ const T4_P32_RC_R1_TEST: [u64; 12] = [
     1904202925, 2469559821, 974687881, 937552036,
 ];
 
-////////////////////////////// Tests //////////////////////////////
+///////////////////////////////////////////////////////////////////////////////
+//////////////////////////////////// Tests ////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////
 
 // Test MDS matrix multiplication with T4_P32_MDS_MATRIX
 #[cfg(test)]

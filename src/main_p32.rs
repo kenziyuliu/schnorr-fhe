@@ -9,27 +9,26 @@ use tfhe::prelude::*;
 use tfhe::set_server_key;
 use tfhe::{FheUint128, FheUint16, FheUint32, FheUint64, FheUint8};
 
-mod constants;
-mod poseidon;
-mod poseidon_p8;
-mod utils;
-// use crate::constants;
-// use crate::poseidon_p8;
-// use crate::utils;
-
+// mod constants;
+// mod poseidon;
+// mod poseidon_p8;
+// mod utils;
+use crate::constants;
+use crate::poseidon;
+use crate::utils;
 
 /*
  * Implementation choices:
  * - We will start with
- *   - 8-bit primes, keys, randomness, and messages (16-bit q for schnorr)
- *   - 16-bit FheUint to handle modulo adds/mults without overflowing
+ *   - 32-bit primes, keys, randomness, and messages (16-bit q for schnorr)
+ *   - 64-bit FheUint to handle modulo adds/mults without overflowing
  * - This implies
  *   - We will need to cast between FheUint types
- *   - we will have << 8-bit values in the FheUint16 container
+ *   - we will have << 32-bit values in the FheUint64 container
  * - Genreally, for a given bit-width n, we will need 2n-bit FheUint containers
  */
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main_p32() -> Result<(), Box<dyn std::error::Error>> {
     let (client_key, server_keys, public_key) = utils::init_keys();
     set_server_key(server_keys);
 
@@ -65,7 +64,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let k_enc_up: FheUint64 = (&k_enc).clone().cast_into();
 
     // #DEBUG DEBUG DEBUG DEBUG DEBUG DEBUG DEBUG DEBUG DEBUG DEBUG DEBUG
-    let k_enc_dec: u32 = k_enc.decrypt(&client_key);
+    let k_enc_dec: u64 = k_enc.decrypt(&client_key);
     utils::log(&format!(
         "DEBUG k_clear from direct hash: {}",
         poseidon::poseidon_p32_clear([msg, x_sch, 0u32, 0u32])
@@ -95,8 +94,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let s_enc: FheUint32 = s_enc_up.cast_into();
 
     utils::log("FHE decryption of FHE(s), FHE(h) @ client ...");
-    let s_dec: u32 = (&s_enc).clone().decrypt(&client_key);
-    let h_dec: u32 = (&h_enc).clone().decrypt(&client_key);
+    let s_dec: u32 = s_enc.decrypt(&client_key);
+    let h_dec: u32 = h_enc.decrypt(&client_key);
 
     //  DEBUG DEBUG DEBUG DEBUG DEBUG DEBUG DEBUG DEBUG DEBUG DEBUG DEBUG
     let hx_dec: u64 = (x_sch as u64 * h_dec as u64) % (q_sch as u64);

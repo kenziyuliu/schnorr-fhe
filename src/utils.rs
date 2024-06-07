@@ -169,6 +169,28 @@ pub fn fhe_exp_16(base: &FheUint16, exp: u16) -> FheUint16 {
     result
 }
 
+
+pub fn fhe_modexp_16(base: &FheUint16, exp: u16, modval: u16) -> FheUint16 {
+    if exp == 0 {
+        // If exp is 0 we need to return an FheUint16 with value 1,
+        // but we can't use the FheUint16::encrypt method because it requires a ClientKey
+        panic!("Exponent should be greater than 0");
+    }
+    let mut result = base.clone();
+    let mut exp = exp - 1; // -1 because init result is base
+    let mut base = base.clone();
+    while exp > 0 {
+        if exp % 2 == 1 {
+            result = &(&result * &base) % modval;
+        }
+        base = &(&base * &base) % modval;
+        exp /= 2;
+    }
+    result
+}
+
+
+
 ///////////////////////////////////////////////////////////////////////////////
 ///////// Fast FHE exponentiation with both FHE base and FHE exponent /////////
 ///////////////////////////////////////////////////////////////////////////////
