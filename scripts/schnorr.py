@@ -9,12 +9,11 @@ SCH_Q_8 = 163
 # Full round = 2, partial round = 1 verification
 
 
-def schnorr_impl(x_sch, g_sch, p_sch, q_sch, hash_fn):
+def schnorr_impl(msg, x_sch, g_sch, p_sch, q_sch, hash_fn):
 
     y_sch = pow(g_sch, x_sch, p_sch)
 
     #### Signing
-    msg = 0xAA
     k_sch = int(hash_fn.run_hash([msg, x_sch, 0, 0])) % (q_sch - 1) + 1
 
     r_sch = pow(g_sch, k_sch, p_sch)
@@ -30,6 +29,7 @@ def schnorr_impl(x_sch, g_sch, p_sch, q_sch, hash_fn):
     r_v = (r_left * r_right) % p_sch
     h_v = int(hash_fn.run_hash([msg, r_v, 0, 0])) % q_sch
 
+    print(f'Message: {msg=:X}')
     print(f'Signature: {x_sch=}, {g_sch=}, {p_sch=}, {q_sch=}, {y_sch=}')
     print(f'Signature: {k_sch=}, {r_sch=}, {h_sch=}, {hx_sch=}, {s_sch=}')
     print(f'Verification:  {h_v=}, {r_left=}, {r_right=}, {r_v=}')
@@ -44,6 +44,7 @@ def schnorr_p8():
     g_sch = SCH_G_8 = 61
     p_sch = SCH_P_8 = 199
     q_sch = SCH_Q_4 = 11
+    msg = 0xAA
 
     H8_r1 = Poseidon(p=p_sch,
                      security_level=8,
@@ -54,16 +55,17 @@ def schnorr_p8():
                      partial_round=1)
     print(f'DEBUG H8_r1.rc_field=\n{[int(rc) for rc in H8_r1.rc_field]}')
     print(f'DEBUG H8_r1.mds_matrix=\n{H8_r1.mds_matrix}')
-    schnorr_impl(x_sch, g_sch, p_sch, q_sch, H8_r1)
+    schnorr_impl(msg, x_sch, g_sch, p_sch, q_sch, H8_r1)
 
 
 def schnorr_p32():
     print("Schnorr 32-bit")
     #### Initialization
-    x_sch = 41231  # Random [1, q-1]
+    x_sch = 40486  # Random [1, q-1]
     g_sch = SCH_G_32 = 3196401078
     p_sch = SCH_P_32 = 3552575077
     q_sch = SCH_Q_16 = 43607
+    msg = 0xAAAAAAAA
 
     H32_r1 = Poseidon(p=p_sch,
                       security_level=32,
@@ -72,7 +74,7 @@ def schnorr_p32():
                       t=4,
                       full_round=8,
                       partial_round=56)
-    schnorr_impl(x_sch, g_sch, p_sch, q_sch, H32_r1)
+    schnorr_impl(msg, x_sch, g_sch, p_sch, q_sch, H32_r1)
 
 
 def schnorr_p256():
@@ -152,7 +154,7 @@ def schnorr_p2048():
 
 if __name__ == "__main__":
     schnorr_p8()
-    # schnorr_p32()
+    schnorr_p32()
     # schnorr_p64()
     # schnorr_p128()
     # schnorr_p256()

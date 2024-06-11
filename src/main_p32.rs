@@ -41,8 +41,14 @@ fn main_p32() -> Result<(), Box<dyn std::error::Error>> {
     let x_sch = rng.gen_range(1..constants::SCH_Q_16);
     let g_sch = BigUint::from(constants::SCH_G_32);
     let p_sch = BigUint::from(constants::SCH_P_32);
-    let q_sch = constants::SCH_Q;
+    let q_sch = constants::SCH_Q_16;
     let y_sch = g_sch.modpow(&BigUint::from(x_sch), &p_sch);
+    // #DEBUG DEBUG DEBUG DEBUG DEBUG DEBUG DEBUG DEBUG DEBUG DEBUG DEBUG
+    utils::log(&format!(
+        "x_sch: {}, g_sch: {}, p_sch: {}, q_sch: {}, y_sch: {}",
+        x_sch, g_sch, p_sch, q_sch, y_sch
+    ));
+
     // Encrypt the signing key
     utils::log("Encrypting signing Schnorr key...");
     let x_sch_enc = FheUint32::encrypt(x_sch, &client_key);

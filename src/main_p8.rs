@@ -45,8 +45,9 @@ fn main_p8() -> Result<(), Box<dyn std::error::Error>> {
     let p_sch = BigUint::from(constants::SCH_P_8);
     let q_sch = constants::SCH_Q_4;
     let y_sch = g_sch.modpow(&BigUint::from(x_sch), &p_sch);
+    // #DEBUG DEBUG DEBUG DEBUG DEBUG DEBUG DEBUG DEBUG DEBUG DEBUG DEBUG
     utils::log(&format!(
-        "DEBUG x_sch: {}, g_sch: {}, p_sch: {}, q_sch: {}, y_sch: {}",
+        "x_sch: {}, g_sch: {}, p_sch: {}, q_sch: {}, y_sch: {}",
         x_sch, g_sch, p_sch, q_sch, y_sch
     ));
 

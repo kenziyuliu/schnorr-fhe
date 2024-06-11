@@ -242,10 +242,35 @@ pub fn fhe2_modexp_16(base_enc: &FheUint16, exp_enc: &FheUint16, modval: u16) ->
     result
 }
 
+
+pub fn fhe2_modexp_64_test(base_enc: u64, exp_enc: u64, modval: u64) -> u64 {
+    // Fast exponentiation of FheUint64 with FheUint64 exponent
+    // NOTE: assumes that the multiplications do not overflow the bitwidth of the FheUint
+    // NOTE: assumes that exp != 0, or else we need to return FHE(1) but public key is required
+    let mut result = base_enc.clone();
+    let mut base_accum = base_enc.clone();
+    let mut exp_enc = exp_enc - 1;
+
+    for _i in 0..64 {
+        let is_even = &exp_enc & 1 == 1;
+        let result_if_even = (&result * &base_accum) % modval;
+        if is_even {
+            result = result_if_even;
+        }
+        // result = is_even.if_then_else(&result_if_even, &result);
+        base_accum = (&base_accum * &base_accum) % modval;
+        exp_enc >>= 1u64;
+    }
+    result
+}
+
+
 // Test fast exponentiation
 #[cfg(test)]
 mod tests {
     use super::*;
+    use num::BigUint;
+    use num_traits::ToPrimitive;
     use tfhe::set_server_key;
 
     #[test]
@@ -383,5 +408,23 @@ mod tests {
         let decrypted_result: u16 = result.decrypt(&client_key);
         let clear_result: u16 = base.pow(exp as u32) % modval;
         assert_eq!(decrypted_result, clear_result);
+    }
+
+    #[test]
+    fn test_fhe2_modexp_clear() {
+        // FIXME / TODO: Test failing!!!
+        let g_sch: u64 = 3196401078;
+        let k_sch: u64 = 28192;
+        let p_sch: u64 = 3552575077;
+        let g_biguint: BigUint = BigUint::from(g_sch);
+        let k_biguint: BigUint = BigUint::from(k_sch);
+        let p_biguint: BigUint = BigUint::from(p_sch);
+        let r_biguint = g_biguint.modpow(&k_biguint, &p_biguint);
+        let r_sch: u64 = r_biguint.to_u64().expect("r_sch is too large");
+        let r_true: u64 = 3196401078;
+        let r_calc: u64 = fhe2_modexp_64_test(g_sch, k_sch, p_sch);
+
+        assert_eq!(r_true, r_sch);
+        assert_eq!(r_calc, r_sch);
     }
 }
