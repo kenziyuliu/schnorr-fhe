@@ -20,6 +20,19 @@ The hash function used is [Poseidon](https://eprint.iacr.org/2019/458.pdf), with
 
 ## Implementation TODOs
 
+* [ ] Elliptic curve implementation
+    - [ ] Implement EC arithmetic operations
+    - [ ] Implement small primes (<= 16-bit) for dev purposes
+    - [ ] Implement curve25519 (256-bit prime)
+
+* [ ] Optimization
+    - [ ] Montgomery multiplication to avoid 2x bitwidth for multiplication?
+    - [ ] Implement clear^FHE
+    - [ ] Optimize FHE modexp that currently uses FHE bit-decomposition for every bit
+
+* [ ] Refactoring (drastically improve code sharing; Ken's not great with Rust yet)
+    - [ ] Implement abstraction over different bit sizes
+
 * [x] Schnorr-FHE Setup
     - [x] x_sch and y_sch generation
     - [x] FHE encryption of x_sch
@@ -60,10 +73,6 @@ The hash function used is [Poseidon](https://eprint.iacr.org/2019/458.pdf), with
 
 * Scaling behavior: implementation/refactoring to support different number of bits
     - (r) Plain Rust doesn't have u256 so we'll use `tfhe::integer::bigint::u256::U256`
-
-* Refactoring
-    - Drastically improve code sharing
-    - Implement abstraction over different bit sizes
 
 * Behavioral tests
     - [x] adding/multiplying plaintexts to FheUints
